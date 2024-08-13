@@ -58,6 +58,50 @@ class BunnyMetaModel:
 
             self.mm_projector.load_state_dict(get_w(mm_projector_weights, 'mm_projector'))
 
+# By zyh
+class BunnyMetaModelForOnellm(BunnyMetaModel):
+    def __init__(self, config):
+        super(BunnyMetaModelForOnellm, self).__init__(config)
+
+        if hasattr(config, "mm_vision_tower"):
+            self.vision_tower = build_vision_tower(config, delay_load=not getattr(config, 'continuous_training', False))
+            if getattr(config, 'continuous_training', False):
+                config.continuous_training = False
+            # self.mm_projector = build_vision_projector(config)
+
+    def initialize_vision_modules(self, model_args):
+        vision_tower = model_args.vision_tower
+
+        # pretrain_mm_mlp_adapter = model_args.pretrain_mm_mlp_adapter
+
+        self.config.mm_vision_tower = vision_tower
+
+        if self.get_vision_tower() is None:
+            vision_tower = build_vision_tower(model_args)
+            self.vision_tower = vision_tower
+        else:
+            vision_tower = self.vision_tower
+            vision_tower.load_model()
+
+        # self.config.use_mm_proj = True
+        # self.config.mm_projector_type = getattr(model_args, 'mm_projector_type')
+        # self.config.mm_hidden_size = vision_tower.hidden_size
+
+        # if getattr(self, 'mm_projector', None) is None:
+        #     self.mm_projector = build_vision_projector(self.config)
+        # else:
+        #     # In case it is frozen by LoRA
+        #     for p in self.mm_projector.parameters():
+        #         p.requires_grad = True
+
+        # if pretrain_mm_mlp_adapter is not None:
+        #     mm_projector_weights = torch.load(pretrain_mm_mlp_adapter, map_location='cpu')
+        #
+        #     def get_w(weights, keyword):
+        #         return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k}
+        #
+        #     self.mm_projector.load_state_dict(get_w(mm_projector_weights, 'mm_projector'))
+
 
 class BunnyMetaForCausalLM(ABC):
 
@@ -70,7 +114,10 @@ class BunnyMetaForCausalLM(ABC):
 
     def encode_images(self, images):
         image_features = self.get_model().get_vision_tower()(images)
-        image_features = self.get_model().mm_projector(image_features)
+        # By zyh
+        # 判断是否存在独立的mm_projector，存在则输出，不存在就不输出
+        if getattr(self.get_model(), 'mm_projector', None) is not None:
+            image_features = self.get_model().mm_projector(image_features)
         return image_features
 
     def prepare_inputs_labels_for_multimodal(

@@ -1,4 +1,6 @@
 import os
+
+from .clip.onellm_clip_encoder import OneLLMVisionTower
 from .eva_clip.eva_clip_encoder import EvaClipVisionTower
 from .siglip.siglip_encoder import SiglipVisionTower, SiglipVisionTowerS2
 from .clip.clip_encoder import CLIPVisionTower
@@ -24,6 +26,14 @@ def build_vision_tower(vision_tower_cfg, **kwargs):
             raise ValueError(f'Currently not supporting S2 for CLIP')
         else:
             return CLIPVisionTower(vision_tower, args=vision_tower_cfg, **kwargs)
+
+    # Add by zyh
+    elif 'onellm' in vision_tower.lower():
+        if use_s2:
+            raise ValueError(f'Currently not supporting S2 for oneLLM')
+        else:
+            params = kwargs['params']
+            return OneLLMVisionTower(vision_tower, params, **kwargs)
 
     else:
         raise ValueError(f'Unknown vision tower: {vision_tower}')

@@ -293,9 +293,8 @@ class UnifiedTower(nn.Module):
 
 
 class UniversalEncoder(nn.Module):
-    def __init__(self, tower_path ,params: ModelArgs, delay_load=False):
+    def __init__(self, params: ModelArgs):
         super().__init__()
-        self.tower_path = tower_path
         self.params = params
         self.vocab_size = params.vocab_size
         self.n_layers = params.n_layers
@@ -404,11 +403,10 @@ class UniversalEncoder(nn.Module):
         # Loading from state_dict and save to path with .pth
         pass
 
-    def load_model(self):
-        logging.info(f"Loading onellm universal encoder from {self.tower_path}")
-        msg = self.load_state_dict(self.tower_path, strict=False)
+    def load_model(self, pth_path):
+        logging.info(f"Loading onellm universal encoder from {pth_path}")
+        msg = self.load_state_dict(pth_path, strict=False)
         logging.info(msg)
-        self.is_loaded = True
 
     @torch.no_grad()
     def forward(self, x, modal="image"):
@@ -496,22 +494,44 @@ class UniversalEncoder(nn.Module):
 
         return x
 
-    @property
-    def dummy_feature(self):
-        pass
-    @property
-    def dtype(self):
-        pass
+class OneLLMVisionTower(nn.Module):
+    def __init__(self, vision_tower_path, params: ModelArgs, delay_load=False):
+        super().__init__()
+
+        self.is_loaded = False
+
+        self.params = params
+        self.vision_tower_name = vision_tower_path
+
+        if not delay_load:
+            self.load_model()
+        else:
+            raise NotImplementedError("由于.pth保存，不能推迟加载模型")
+
+
+    def load_model(self):
+        # 注意：后续这个通用编码器是不需要跨模态投影器得
+        self.vision_tower = UniversalEncoder(self.params)
+        self.vision_tower.load_model(self.vision_tower_name)
+        self.vision_tower.requires_grad_(False)
+
+        self.is_loaded = True
+
+    @torch.no_grad()
+    def forward(self, info, modal="image"):
+        # 只允许一份信息送入
+        info_features = self.vision_tower(info.to(device=self.device,
+                                                  dtype=self.dtype), modal=modal)
+        return info_features
+
     @property
     def device(self):
-        pass
+        return self.vision_tower.device
+
     @property
-    def config(self):
-        pass
-    @property
-    def hidden_size(self):
-        pass
+    def dtype(self):
+        return self.vision_tower.dtype
 
     @property
     def num_patches(self):
-        pass
+        raise NotImplementedError

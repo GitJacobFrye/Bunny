@@ -217,6 +217,11 @@ class ModelWorker:
             }
             yield json.dumps(ret).encode() + b"\0"
 
+class Onellm_ModelWorker(ModelWorker):
+    # --TODO: Use gradio interface from OneLLM directly
+    pass
+
+
 
 app = FastAPI()
 
@@ -274,17 +279,31 @@ if __name__ == "__main__":
     if args.multi_modal:
         logger.warning("Multimodal mode is automatically detected with model name.")
 
-    worker = ModelWorker(args.controller_address,
-                         args.worker_address,
-                         worker_id,
-                         args.no_register,
-                         args.model_path,
-                         args.model_base,
-                         args.model_name,
-                         args.model_type,
-                         args.load_8bit,
-                         args.load_4bit,
-                         args.device)
+    # 如果是其他编码器，采用ModelWorker;如果是onellm编码器，采用Onellm_ModelWorker
+    if args.model_type is "phi-3-onellm":
+        worker = Onellm_ModelWorker(args.controller_address,
+                             args.worker_address,
+                             worker_id,
+                             args.no_register,
+                             args.model_path,
+                             args.model_base,
+                             args.model_name,
+                             args.model_type,
+                             args.load_8bit,
+                             args.load_4bit,
+                             args.device)
+    else:
+        worker = ModelWorker(args.controller_address,
+                             args.worker_address,
+                             worker_id,
+                             args.no_register,
+                             args.model_path,
+                             args.model_base,
+                             args.model_name,
+                             args.model_type,
+                             args.load_8bit,
+                             args.load_4bit,
+                             args.device)
 
     log_config = uvicorn.config.LOGGING_CONFIG
     log_config['handlers']['default']['stream'] = 'ext://sys.stdout'

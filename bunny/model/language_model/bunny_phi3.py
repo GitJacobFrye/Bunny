@@ -8,7 +8,7 @@ from .phi3 import Phi3Model, Phi3Config, Phi3ForCausalLM
 
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from ..bunny_arch import BunnyMetaModel, BunnyMetaForCausalLM
+from ..bunny_arch import BunnyMetaModel, BunnyMetaForCausalLM, BunnyMetaModelForOnellm
 
 
 class BunnyPhi3Config(Phi3Config):
@@ -21,6 +21,10 @@ class BunnyPhi3Model(BunnyMetaModel, Phi3Model):
     def __init__(self, config: Phi3Config):
         super(BunnyPhi3Model, self).__init__(config)
 
+class BunnyPhi3ModelForOnellm(BunnyMetaModelForOnellm, Phi3Model):
+    config_class = BunnyPhi3Config
+    def __init__(self, config: Phi3Config):
+        super(BunnyPhi3ModelForOnellm, self).__init__(config)
 
 class BunnyPhi3ForCausalLM(Phi3ForCausalLM, BunnyMetaForCausalLM):
     config_class = BunnyPhi3Config
@@ -95,6 +99,20 @@ class BunnyPhi3ForCausalLM(Phi3ForCausalLM, BunnyMetaForCausalLM):
             _inputs['images'] = images
         return _inputs
 
+class BunnyPhi3ForCausalLM_onellm(BunnyPhi3ForCausalLM):
+    config_class = BunnyPhi3Config
+
+    def __init__(self, config):
+        super(Phi3ForCausalLM, self).__init__(config)
+        # 只需要这里修改
+        self.model = BunnyPhi3ModelForOnellm(config)
+        self.vocab_size = config.vocab_size
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+
+        # Initialize weights and apply final processing
+        self.post_init()
 
 AutoConfig.register("bunny-phi3", BunnyPhi3Config)
 AutoModelForCausalLM.register(BunnyPhi3Config, BunnyPhi3ForCausalLM)
+
+AutoModelForCausalLM.register(BunnyPhi3Config, BunnyPhi3ForCausalLM_onellm)

@@ -12,7 +12,7 @@ from bunny.model import *
 
 def load_pretrained_model(model_path, model_base, model_name, model_type, load_8bit=False, load_4bit=False,
                           device_map="auto", device="cuda", **kwargs):
-    if model_type not in {'phi-1.5', 'phi-2', 'phi-3', 'stablelm-2', 'qwen1.5-1.8b', 'minicpm', 'llama3-8b'}:
+    if model_type not in {'phi-1.5', 'phi-2', 'phi-3', 'stablelm-2', 'qwen1.5-1.8b', 'minicpm', 'llama3-8b', 'phi-3-onellm'}:
         raise ValueError(f"Unknown Model Type {model_type}")
 
     kwargs = {"device_map": device_map, **kwargs}
@@ -49,6 +49,13 @@ def load_pretrained_model(model_path, model_base, model_name, model_type, load_8
             tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=True)
             model = BunnyPhi3ForCausalLM.from_pretrained(model_base, low_cpu_mem_usage=True,
                                                          config=lora_cfg_pretrained, **kwargs)
+        # By zyh
+        elif model_type == 'phi-3-onellm':
+            # --TODO load tokenizer from onellm
+            tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=True)
+            model = BunnyPhi3ForCausalLM_onellm.from_pretrained(model_base, low_cpu_mem_usage=True,
+                                                                config=lora_cfg_pretrained, **kwargs)
+
         elif model_type == 'stablelm-2':
             tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=True, trust_remote_code=True)
             model = BunnyStableLMForCausalLM.from_pretrained(model_base, low_cpu_mem_usage=True,
@@ -116,6 +123,13 @@ def load_pretrained_model(model_path, model_base, model_name, model_type, load_8
             tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=True)
             model = BunnyPhi3ForCausalLM.from_pretrained(model_base, low_cpu_mem_usage=True,
                                                          config=cfg_pretrained, **kwargs)
+
+        elif model_type == 'phi-3-onellm':
+            # --TODO load tokenizer from onellm
+            tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=True)
+            model = BunnyPhi3ForCausalLM.from_pretrained(model_base, low_cpu_mem_usage=True,
+                                                         config=cfg_pretrained, **kwargs)
+
         elif model_type == 'stablelm-2':
             tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=True, trust_remote_code=True)
             model = BunnyStableLMForCausalLM.from_pretrained(model_base, low_cpu_mem_usage=True,
@@ -133,9 +147,11 @@ def load_pretrained_model(model_path, model_base, model_name, model_type, load_8
             model = BunnyLlamaForCausalLM.from_pretrained(model_base, low_cpu_mem_usage=True, config=cfg_pretrained,
                                                           **kwargs)
 
-        mm_projector_weights = torch.load(os.path.join(model_path, 'mm_projector.bin'), map_location='cpu')
-        mm_projector_weights = {k: v.to(torch.float16) for k, v in mm_projector_weights.items()}
-        model.load_state_dict(mm_projector_weights, strict=False)
+        if model_type != 'phi-3-onellm':
+            mm_projector_weights = torch.load(os.path.join(model_path, 'mm_projector.bin'), map_location='cpu')
+            mm_projector_weights = {k: v.to(torch.float16) for k, v in mm_projector_weights.items()}
+            model.load_state_dict(mm_projector_weights, strict=False)
+
     else:
         if model_type == 'phi-1.5' or model_type == 'phi-2':
             tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
@@ -143,6 +159,13 @@ def load_pretrained_model(model_path, model_base, model_name, model_type, load_8
         elif model_type == 'phi-3':
             tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
             model = BunnyPhi3ForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=True, **kwargs)
+
+        # --------------------ADD-------------------
+        elif model_type == 'phi-3-onellm':
+            # --TODO load tokenizer from onellm
+            tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
+            model = BunnyPhi3ForCausalLM_onellm.from_pretrained(model_path, low_cpu_mem_usage=True, **kwargs)
+
         elif model_type == 'stablelm-2':
             tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True, trust_remote_code=True)
             model = BunnyStableLMForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=True, **kwargs)
@@ -162,25 +185,34 @@ def load_pretrained_model(model_path, model_base, model_name, model_type, load_8
     if not vision_tower.is_loaded:
         vision_tower.load_model()
 
-    if getattr(model.config, "unfreeze_vision_tower", False):
-        if 'lora' in model_name.lower():
-            assert model_base is not None
-            vision_non_lora_trainables = {k[19:]: v for k, v in non_lora_trainables.items() if
-                                          k.startswith('model.vision_tower.')}
-            vision_tower.load_state_dict(vision_non_lora_trainables, strict=False)
-        else:
-            assert model_base is None
-            from safetensors.torch import load_file
-            vision_weights = {}
-            for file_name in os.listdir(model_path):
-                if file_name.endswith('safetensors'):
-                    vision_weights.update(
-                        {k[19:]: v for k, v in load_file(os.path.join(model_path, file_name)).items() if
-                         k.startswith('model.vision_tower.')})
-            vision_tower.load_state_dict(vision_weights, strict=True)
+    # 如果采用OneLLM，不允许微调通用编码器
+    if model_type != 'phi-3-onellm':
+        if getattr(model.config, "unfreeze_vision_tower", False):
+            # 如果解冻视觉编码器
+            if 'lora' in model_name.lower():
+                # 如果进行lora微调
+                assert model_base is not None
+                vision_non_lora_trainables = {k[19:]: v for k, v in non_lora_trainables.items() if
+                                              k.startswith('model.vision_tower.')}
+                vision_tower.load_state_dict(vision_non_lora_trainables, strict=False)
+            else:
+                assert model_base is None
+                from safetensors.torch import load_file
+                vision_weights = {}
+                for file_name in os.listdir(model_path):
+                    if file_name.endswith('safetensors'):
+                        vision_weights.update(
+                            {k[19:]: v for k, v in load_file(os.path.join(model_path, file_name)).items() if
+                             k.startswith('model.vision_tower.')})
+                vision_tower.load_state_dict(vision_weights, strict=True)
 
     vision_tower.to(device=device, dtype=torch.float16)
-    image_processor = vision_tower.image_processor
+
+    # Onellm不需要图像处理
+    if model_type != 'phi-3-onellm':
+        image_processor = vision_tower.image_processor
+    else:
+        image_processor = None
 
     if hasattr(model.config, "max_sequence_length"):
         context_len = model.config.max_sequence_length
