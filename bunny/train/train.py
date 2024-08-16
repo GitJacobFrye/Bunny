@@ -226,6 +226,9 @@ def train():
             use_fast=True,
             trust_remote_code=True
         )
+    # By zyh
+    elif model_args.model_type == 'phi-3-onellm':
+        tokenizer = OneLLMTokenizer("../model/tokenizer.model")
 
     if tokenizer.unk_token is not None and tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.unk_token
@@ -233,6 +236,8 @@ def train():
     if model_args.model_type == 'llama3-8b':
         tokenizer.eos_token_id = 128001
         tokenizer.pad_token = tokenizer.eos_token
+
+    # -------------------------load model---------------------------
 
     if model_args.model_type == 'phi-1.5' or model_args.model_type == 'phi-2':
         model = BunnyPhiForCausalLM.from_pretrained(
@@ -248,6 +253,15 @@ def train():
             cache_dir=training_args.cache_dir,
             **bnb_model_from_pretrained_args
         )
+
+    # By zyh
+    elif model_args.model_type == 'phi-3-onellm':
+        model = BunnyPhi3ForCausalLM_onellm.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            **bnb_model_from_pretrained_args
+        )
+
     elif model_args.model_type == 'stablelm-2':
         model = BunnyStableLMForCausalLM.from_pretrained(
             model_args.model_name_or_path,
@@ -325,27 +339,40 @@ def train():
     vision_tower = model.get_vision_tower()
     vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
 
-    data_args.image_processor = vision_tower.image_processor
+    # By zyh
+    if model_args.model_type != 'phi-3-onellm':
+        data_args.image_processor = vision_tower.image_processor
+    else:
+        data_args.image_processor = None
 
     model.config.image_aspect_ratio = data_args.image_aspect_ratio
     model.config.tokenizer_padding_side = tokenizer.padding_side
     model.config.tokenizer_model_max_length = tokenizer.model_max_length
 
-    model.config.tune_mm_mlp_adapter = training_args.tune_mm_mlp_adapter = model_args.tune_mm_mlp_adapter
-    if model_args.tune_mm_mlp_adapter:
-        model.requires_grad_(False)
-        for p in model.get_model().mm_projector.parameters():
-            p.requires_grad = True
+    # 模态映射器，在onellm模型中被整合在了vision_tower中
 
-    model.config.freeze_mm_mlp_adapter = training_args.freeze_mm_mlp_adapter
-    if training_args.freeze_mm_mlp_adapter:
-        for p in model.get_model().mm_projector.parameters():
-            p.requires_grad = False
+    if model_args.model_type != 'phi-3-onellm':
 
-    if training_args.bits in [4, 8]:
-        model.get_model().mm_projector.to(dtype=compute_dtype, device=training_args.device)
+        model.config.tune_mm_mlp_adapter = training_args.tune_mm_mlp_adapter = model_args.tune_mm_mlp_adapter
+        if model_args.tune_mm_mlp_adapter:
+            model.requires_grad_(False)
+            for p in model.get_model().mm_projector.parameters():
+                p.requires_grad = True
 
-    model.config.mm_projector_lr = training_args.mm_projector_lr
+        model.config.freeze_mm_mlp_adapter = training_args.freeze_mm_mlp_adapter
+        if training_args.freeze_mm_mlp_adapter:
+            for p in model.get_model().mm_projector.parameters():
+                p.requires_grad = False
+
+        if training_args.bits in [4, 8]:
+            model.get_model().mm_projector.to(dtype=compute_dtype, device=training_args.device)
+
+        model.config.mm_projector_lr = training_args.mm_projector_lr
+
+    else:
+        model_args.tune_mm_mlp_adapter = False
+        model_args.freeze_mm_mlp_adapter = False
+        print("Note: Phi-3-onellm model was chosen, mm_mlp_adapter not required.")
 
     model.config.use_s2 = model_args.use_s2
 
@@ -367,6 +394,7 @@ def train():
                     if training_args.bf16 and module.weight.dtype == torch.float32:
                         module = module.to(torch.bfloat16)
 
+    # --TODO: change datatype if needed
     data_module = make_supervised_data_module(tokenizer=tokenizer,
                                               data_args=data_args)
     trainer = BunnyTrainer(model=model,

@@ -127,7 +127,7 @@ def load_pretrained_model(model_path, model_base, model_name, model_type, load_8
         elif model_type == 'phi-3-onellm':
             # --TODO load tokenizer from onellm
             tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=True)
-            model = BunnyPhi3ForCausalLM.from_pretrained(model_base, low_cpu_mem_usage=True,
+            model = BunnyPhi3ForCausalLM_onellm.from_pretrained(model_base, low_cpu_mem_usage=True,
                                                          config=cfg_pretrained, **kwargs)
 
         elif model_type == 'stablelm-2':
