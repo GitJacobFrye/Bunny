@@ -209,7 +209,7 @@ def train():
         ))
 
     assert model_args.vision_tower is not None
-    if model_args.model_type in {'phi-1.5', 'phi-2', 'phi-3', 'qwen1.5-1.8b', 'minicpm', 'llama3-8b'}:
+    if model_args.model_type in {'phi-1.5', 'phi-2', 'phi-3', 'phi-3-onellm', 'qwen1.5-1.8b', 'minicpm', 'llama3-8b'}:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
@@ -226,9 +226,6 @@ def train():
             use_fast=True,
             trust_remote_code=True
         )
-    # By zyh
-    elif model_args.model_type == 'phi-3-onellm':
-        tokenizer = OneLLMTokenizer("../model/tokenizer.model")
 
     if tokenizer.unk_token is not None and tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.unk_token
