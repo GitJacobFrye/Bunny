@@ -183,6 +183,7 @@ def load_pretrained_model(model_path, model_base, model_name, model_type, load_8
 
     vision_tower = model.get_vision_tower()
     if not vision_tower.is_loaded:
+        print("Builder由于模型未加载，加载模型...")
         vision_tower.load_model()
 
     # 如果采用OneLLM，不允许微调通用编码器

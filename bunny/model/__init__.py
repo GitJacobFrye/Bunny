@@ -5,4 +5,5 @@ from .language_model.bunny_minicpm import BunnyMiniCPMForCausalLM, BunnyMiniCPMC
 from .language_model.bunny_llama import BunnyLlamaForCausalLM, BunnyLlamaConfig
 from .language_model.bunny_phi3 import BunnyPhi3ForCausalLM, BunnyPhi3Config, BunnyPhi3ForCausalLM_onellm
 # by zyh
-from .tokenizer import OneLLMTokenizer
+# from .tokenizer import OneLLMTokenizer
+from .multimodal_encoder.clip.onellm_clip_encoder import UniversalEncoder, OneLLMVisionTower

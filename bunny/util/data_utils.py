@@ -350,8 +350,42 @@ class LazySupervisedDataset(Dataset):
             # image does not exist in the data, but the model is multimodal
             crop_size = self.data_args.image_processor.crop_size
             data_dict['image'] = torch.zeros(3, crop_size['height'], crop_size['width'])
+        # print(f"是否需要梯度：{data_dict['image'].requires_grad}")
         return data_dict
 
+# class LazySupervisedDataset_onellm(LazySupervisedDataset):
+#     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
+#         sources = self.list_data_dict[i]
+#         if isinstance(i, int):
+#             sources = [sources]
+#         assert len(sources) == 1, "Don't know why it is wrapped to a list"  # FIXME
+#         if 'image' in sources[0]:
+#             image_file = self.list_data_dict[i]['image']
+#             image_folder = self.data_args.image_folder
+#             processor = None
+#             image = Image.open(os.path.join(image_folder, image_file)).convert('RGB')
+#             sources = preprocess_multimodal(
+#                 copy.deepcopy([e["conversations"] for e in sources]), self.data_args)
+#         else:
+#             sources = copy.deepcopy([e["conversations"] for e in sources])
+#         data_dict = preprocess(
+#             sources,
+#             self.tokenizer,
+#             has_image=('image' in self.list_data_dict[i]))
+#         if isinstance(i, int):
+#             data_dict = dict(input_ids=data_dict["input_ids"][0],
+#                              labels=data_dict["labels"][0])
+#         # image exist in the data
+#         if 'image' in self.list_data_dict[i]:
+#             data_dict['image'] = image
+#         elif self.data_args.is_multimodal:
+#             # image does not exist in the data, but the model is multimodal
+#             crop_size = {
+#                 'height' : 224,
+#                 'width' : 224
+#             }
+#             data_dict['image'] = torch.zeros(3, crop_size['height'], crop_size['width'])
+#         return data_dict
 
 @dataclass
 class DataCollatorForSupervisedDataset(object):
@@ -406,9 +440,19 @@ class DataCollatorForSupervisedDataset(object):
 def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer,
                                 data_args) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
-    train_dataset = LazySupervisedDataset(tokenizer=tokenizer,
-                                          data_path=data_args.data_path,
-                                          data_args=data_args)
+    if data_args.image_processor:
+        train_dataset = LazySupervisedDataset(tokenizer=tokenizer,
+                                            data_path=data_args.data_path,
+                                            data_args=data_args)
+    # else:
+    #     train_dataset = LazySupervisedDataset_onellm(tokenizer=tokenizer,
+    #                                         data_path=data_args.data_path,
+    #                                         data_args=data_args)
+    #     print("Loading supervised dataset for onellm.")
+
+    else:
+        raise NotImplementedError("Not support.")
+
     data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
     return dict(train_dataset=train_dataset,
                 eval_dataset=None,

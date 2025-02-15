@@ -3,6 +3,7 @@ import torch.nn as nn
 
 from transformers import SiglipVisionModel, SiglipImageProcessor, SiglipVisionConfig
 from bunny.util.s2wrapper import forward as multiscale_forward
+# from .....util.s2wrapper import forward as multiscale_forward
 
 
 class SiglipVisionTower(nn.Module):

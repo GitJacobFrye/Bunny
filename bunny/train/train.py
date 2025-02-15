@@ -1,12 +1,16 @@
 import os
 from dataclasses import dataclass, field
 import logging
+logging.basicConfig(level=logging.DEBUG)
 import pathlib
 from typing import Optional
 
 import torch
 
 import transformers
+
+import sys
+sys.path.append("/cpfs01/projects-HDD/cfff-4a6c654d10ce_HDD/zyh_23210440066/Bunny_version_816")
 
 from bunny.train.bunny_trainer import BunnyTrainer
 
@@ -186,6 +190,7 @@ def train():
 
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    # print(f"训练参数：{training_args}")
     local_rank = training_args.local_rank
     compute_dtype = (torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
 
@@ -208,8 +213,10 @@ def train():
             )
         ))
 
+    logging.debug("deepspeed初始化完成...")
+
     assert model_args.vision_tower is not None
-    if model_args.model_type in {'phi-1.5', 'phi-2', 'phi-3', 'qwen1.5-1.8b', 'minicpm', 'llama3-8b'}:
+    if model_args.model_type in {'phi-1.5', 'phi-2', 'phi-3', 'qwen1.5-1.8b', 'minicpm', 'llama3-8b', 'phi-3-onellm'}:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
@@ -226,9 +233,6 @@ def train():
             use_fast=True,
             trust_remote_code=True
         )
-    # By zyh
-    elif model_args.model_type == 'phi-3-onellm':
-        tokenizer = OneLLMTokenizer("../model/tokenizer.model")
 
     if tokenizer.unk_token is not None and tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.unk_token
@@ -236,6 +240,8 @@ def train():
     if model_args.model_type == 'llama3-8b':
         tokenizer.eos_token_id = 128001
         tokenizer.pad_token = tokenizer.eos_token
+
+    logging.debug("Tokenizer加载成功...")
 
     # -------------------------load model---------------------------
 
@@ -290,8 +296,9 @@ def train():
         )
     else:
         raise ValueError(f"Unknown Model Type {model_args.model_type}")
-
+    
     model.config.use_cache = False
+    logging.debug("模型加载成功...")
 
     if model_args.freeze_backbone:
         model.model.requires_grad_(False)
@@ -328,6 +335,8 @@ def train():
                 model.to(torch.float16)
         rank0_print("Adding LoRA adapters...")
         model = get_peft_model(model, lora_config)
+    
+    logging.debug("量化加载完成...")
 
     if model_args.version in conversation_lib.conv_templates:
         conversation_lib.default_conversation = conversation_lib.conv_templates[model_args.version]
@@ -340,14 +349,13 @@ def train():
     vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
 
     # By zyh
-    if model_args.model_type != 'phi-3-onellm':
-        data_args.image_processor = vision_tower.image_processor
-    else:
-        data_args.image_processor = None
+    data_args.image_processor = vision_tower.image_processor
 
     model.config.image_aspect_ratio = data_args.image_aspect_ratio
     model.config.tokenizer_padding_side = tokenizer.padding_side
     model.config.tokenizer_model_max_length = tokenizer.model_max_length
+
+    logging.debug(f"Vision_tower加载完成...{vision_tower}")
 
     # 模态映射器，在onellm模型中被整合在了vision_tower中
 
@@ -370,6 +378,10 @@ def train():
         model.config.mm_projector_lr = training_args.mm_projector_lr
 
     else:
+        # 这两句话是为了观察全流程是否正常完成，如果设置为False，模型训练无效，因为梯度不再保存
+        model.requires_grad_(False)
+        model.get_model().vision_tower.requires_grad_(True)
+
         model_args.tune_mm_mlp_adapter = False
         model_args.freeze_mm_mlp_adapter = False
         print("Note: Phi-3-onellm model was chosen, mm_mlp_adapter not required.")
@@ -381,6 +393,8 @@ def train():
         for p in model.get_model().vision_tower.parameters():
             p.requires_grad = True
 
+    logging.debug("视觉编码器解冻完成...")
+    
     if training_args.bits in [4, 8]:
         from peft.tuners.lora import LoraLayer
         for name, module in model.named_modules():
@@ -393,18 +407,29 @@ def train():
                 if hasattr(module, 'weight'):
                     if training_args.bf16 and module.weight.dtype == torch.float32:
                         module = module.to(torch.bfloat16)
+    
+    logging.debug("训练Module量化完成...")
 
     # --TODO: change datatype if needed
     data_module = make_supervised_data_module(tokenizer=tokenizer,
                                               data_args=data_args)
+    logging.debug("训练数据加载成功...")
+
+    # # 输出model的梯度
+    # for name, param in model.named_parameters():
+    #     print(f"Layer: {name} | requires_grad: {param.requires_grad}")
+
     trainer = BunnyTrainer(model=model,
                            tokenizer=tokenizer,
                            args=training_args,
                            **data_module)
 
+    logging.debug("Trainer初始化完成...")
+
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
         trainer.train(resume_from_checkpoint=True)
     else:
+        logging.debug("准备开始训练...")
         trainer.train()
     trainer.save_state()
 

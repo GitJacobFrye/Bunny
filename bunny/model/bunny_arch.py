@@ -14,7 +14,12 @@ class BunnyMetaModel:
         super(BunnyMetaModel, self).__init__(config)
 
         if hasattr(config, "mm_vision_tower"):
-            self.vision_tower = build_vision_tower(config, delay_load=not getattr(config, 'continuous_training', False))
+            # print(f"初始化vision_tower:{config}")
+            if getattr(config, 'model_type') != "bunny-phi3-onellm":
+                self.vision_tower = build_vision_tower(config, delay_load=not getattr(config, 'continuous_training', False))
+            else:
+                # 默认delay_load = False
+                self.vision_tower = build_vision_tower(config)
             if getattr(config, 'continuous_training', False):
                 config.continuous_training = False
             self.mm_projector = build_vision_projector(config)
@@ -37,6 +42,7 @@ class BunnyMetaModel:
             self.vision_tower = vision_tower
         else:
             vision_tower = self.vision_tower
+            print("BunnyMetaModel初始化视觉编码器加载模型...")
             vision_tower.load_model()
 
         self.config.use_mm_proj = True
@@ -61,10 +67,14 @@ class BunnyMetaModel:
 # By zyh
 class BunnyMetaModelForOnellm(BunnyMetaModel):
     def __init__(self, config):
-        super(BunnyMetaModelForOnellm, self).__init__(config)
+        super(BunnyMetaModel, self).__init__(config)
 
         if hasattr(config, "mm_vision_tower"):
-            self.vision_tower = build_vision_tower(config, delay_load=not getattr(config, 'continuous_training', False))
+            if getattr(config, 'model_type') != "bunny-phi3-onellm":
+                self.vision_tower = build_vision_tower(config, delay_load=not getattr(config, 'continuous_training', False))
+            else:
+                # 默认delay_load = False
+                self.vision_tower = build_vision_tower(config)
             if getattr(config, 'continuous_training', False):
                 config.continuous_training = False
             # self.mm_projector = build_vision_projector(config)
@@ -79,9 +89,11 @@ class BunnyMetaModelForOnellm(BunnyMetaModel):
         if self.get_vision_tower() is None:
             vision_tower = build_vision_tower(model_args)
             self.vision_tower = vision_tower
-        else:
+        elif not self.vision_tower.is_loaded:
             vision_tower = self.vision_tower
             vision_tower.load_model()
+        else:
+            pass
 
         # self.config.use_mm_proj = True
         # self.config.mm_projector_type = getattr(model_args, 'mm_projector_type')
@@ -117,6 +129,7 @@ class BunnyMetaForCausalLM(ABC):
         # By zyh
         # 判断是否存在独立的mm_projector，存在则输出，不存在就不输出
         if getattr(self.get_model(), 'mm_projector', None) is not None:
+            print("不存在MM_PROJECTOR")
             image_features = self.get_model().mm_projector(image_features)
         return image_features
 
@@ -144,6 +157,14 @@ class BunnyMetaForCausalLM(ABC):
             image_features = [x.flatten(0, 1).to(self.device) for x in image_features]
         else:
             image_features = self.encode_images(images).to(self.device)
+        
+        model_type = str(type(self.model))
+        # print(f"模型：{model_type}")
+        # OneLLM需要降维
+        if "BunnyPhi3ModelForOnellm" in str(type(self.get_model())):
+            image_features = self.dim_projector(image_features)
+            
+        # print(f"图像特征维度：{image_features.shape}")
 
         # Let's just add dummy tensors if they do not exist,
         # it is a headache to deal with None all the time.
@@ -209,6 +230,8 @@ class BunnyMetaForCausalLM(ABC):
                 if i < num_images:
                     cur_image_features = image_features[cur_image_idx]
                     cur_image_idx += 1
+                    # zyh
+                    # print(f"cur_image_features 形状: {cur_image_features.shape}")
                     cur_new_input_embeds.append(cur_image_features)
                     cur_new_labels.append(
                         torch.full((cur_image_features.shape[0],), IGNORE_INDEX, device=cur_labels.device,
@@ -225,6 +248,9 @@ class BunnyMetaForCausalLM(ABC):
         if tokenizer_model_max_length is not None:
             new_input_embeds = [x[:tokenizer_model_max_length] for x in new_input_embeds]
             new_labels = [x[:tokenizer_model_max_length] for x in new_labels]
+
+        # 25_2_12: 原来图片编码超出最大长度也会被截断（第一个维度是batch，第二个维度是sequence length）
+        # new_input_embeds实际上已经包含了图像编码和文本编码
 
         # Combine them
         max_len = max(x.shape[0] for x in new_input_embeds)
